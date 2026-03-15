@@ -136,14 +136,15 @@ export function getNearestHub(
   return { hub: nearest, distanceKm: minDist };
 }
 
+/** Haversine formula: d = 2R arcsin(sqrt(sin²(Δφ/2) + cos φ₁ cos φ₂ sin²(Δλ/2))) */
 export function getDirectDistance(from: [number, number], to: [number, number]): number {
   const R = 6371; // Earth radius km
-  const dLat = ((to[0] - from[0]) * Math.PI) / 180;
-  const dLng = ((to[1] - from[1]) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((from[0] * Math.PI) / 180) * Math.cos((to[0] * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const φ1 = (from[0] * Math.PI) / 180;
+  const φ2 = (to[0] * Math.PI) / 180;
+  const Δφ = ((to[0] - from[0]) * Math.PI) / 180;
+  const Δλ = ((to[1] - from[1]) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  const c = 2 * Math.asin(Math.sqrt(a));
   return R * c;
 }
 

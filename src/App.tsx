@@ -17,6 +17,7 @@ import StandardLogistics from './modules/logistics/StandardLogistics';
 import ProtectedRoute from './components/ProtectedRoute';
 import { getOrCreateGuestId, getGuestId } from './utils/session';
 import { getUnsyncedRequests, markAsSynced } from './services/offlineDb';
+import { syncPendingMissions } from './services/missionSync';
 import { submitHelpRequest } from './services/api';
 import { supabase } from './lib/supabaseClient';
 import './App.css';
@@ -25,7 +26,7 @@ const LOCATION_PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export type UserRole = 'distress' | 'volunteer';
 
-/** Sync unsynced help requests to backend when online */
+/** Sync unsynced help requests and pending missions when online */
 function useHelpRequestSync() {
   useEffect(() => {
     const doSync = async () => {
@@ -47,6 +48,7 @@ function useHelpRequestSync() {
             /* Leave unsynced for retry */
           }
         }
+        await syncPendingMissions();
       } catch {
         /* ignore */
       }

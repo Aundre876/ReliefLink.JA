@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllHelpRequests, saveHelpRequest } from '../../services/offlineDb';
+import { saveMission, syncPendingMissions } from '../../services/missionSync';
+import { supabase } from '../../lib/supabaseClient';
 import { getLastKnownLocation, saveLastKnownLocation } from '../../services/locationPersistence';
-import { getNearestHub, LOGISTICS_HUBS, JAMAICA_PARISHES, getHubCoordsForParish } from '../../services/routing';
+import { getNearestHub, LOGISTICS_HUBS, JAMAICA_PARISHES, getHubCoordsForParish, getDirectDistance } from '../../services/routing';
 import { getOrCreateGuestId, getGuestId } from '../../utils/session';
 import PriorityQueue from './PriorityQueue';
 import IncidentMap from './IncidentMap';
@@ -39,6 +41,13 @@ const QUICK_SELECT_ITEMS = [
 
 const TOAST_DURATION_MS = 4000;
 
+function formatElapsed(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return [h, m, s].map((n) => n.toString().padStart(2, '0')).join(':');
+}
+
 export default function EmergencyResponse({
   isDistressUser,
   isHighPriority,
@@ -51,11 +60,24 @@ export default function EmergencyResponse({
   const [activeTab, setActiveTab] = useState<ErTab>('form');
   const [helpRequests, setHelpRequests] = useState<{ lat: number; lng: number; message: string }[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [specificNeeds, setSpecificNeeds] = useState('');
   const [quickSelectItems, setQuickSelectItems] = useState<Set<string>>(new Set());
   const [locationFailed, setLocationFailed] = useState(false);
+  const [locationAcquiring, setLocationAcquiring] = useState(false);
+  const [pathHistory, setPathHistory] = useState<[number, number][]>([]);
+  const [totalDistance, setTotalDistance] = useState(0);
+  const [missionActive, setMissionActive] = useState(false);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [missionSummaryOpen, setMissionSummaryOpen] = useState(false);
+  const [missionSummaryData, setMissionSummaryData] = useState<{
+    elapsedTime: number;
+    totalDistance: number;
+    pathPoints: number;
+  } | null>(null);
   const [selectedParish, setSelectedParish] = useState<string>('');
   const [toast, setToast] = useState<string | null>(null);
   const [showCriss, setShowCriss] = useState(false);
@@ -65,6 +87,8 @@ export default function EmergencyResponse({
     distanceKm: number;
   } | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const hasDispatchedRef = useRef(false);
   const navigate = useNavigate();
 
   const userName = (typeof window !== 'undefined' && localStorage.getItem(USER_NAME_KEY)) || 'there';
@@ -81,8 +105,20 @@ export default function EmergencyResponse({
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (watchIdRef.current != null) {
+        navigator.geolocation?.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!missionActive || startTime == null) return;
+    const interval = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [missionActive, startTime]);
 
   const refreshHelpRequests = useCallback(() => {
     getAllHelpRequests().then((data) => {
@@ -90,16 +126,93 @@ export default function EmergencyResponse({
     });
   }, []);
 
+  const JITTER_THRESHOLD_KM = 0.005;
+
   const triggerLocationPing = useCallback(
     (categoryLabel: string) => {
       if (!navigator.geolocation) {
         setLocationFailed(true);
+        showToast('Enable High Accuracy in your device settings for precise disaster logistics.');
+        return;
+      }
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      setPathHistory([]);
+      setTotalDistance(0);
+      hasDispatchedRef.current = false;
+      setLocationAcquiring(true);
+      setLocationFailed(false);
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+          setPathHistory((prev) => {
+            const last = prev[prev.length - 1];
+            if (!last) {
+              setUserLocation(coords);
+              setLocationAccuracy(pos.coords.accuracy ?? null);
+              setLocationAcquiring(false);
+              setLocationFailed(false);
+              saveLastKnownLocation(coords[0], coords[1]);
+              if (!hasDispatchedRef.current) {
+                hasDispatchedRef.current = true;
+                const nearest = getNearestHub(coords, LOGISTICS_HUBS);
+                const hubName = nearest?.hub.name ?? 'nearest hub';
+                saveHelpRequest({
+                  lat: coords[0],
+                  lng: coords[1],
+                  message: `Pending - ${categoryLabel} - Dispatching to ${hubName}`,
+                  timestamp: Date.now(),
+                  severity: 7,
+                  ...(isDistressUser && { guestId: getGuestId() ?? getOrCreateGuestId() }),
+                }).then(() => {
+                  refreshHelpRequests();
+                  setQueueRefresh((n) => n + 1);
+                });
+                showToast('Location captured. Dispatching coordinates to nearest hub...');
+              }
+              return [coords];
+            }
+            const distKm = getDirectDistance(last, coords);
+            if (distKm <= JITTER_THRESHOLD_KM) {
+              setLocationAccuracy(pos.coords.accuracy ?? null);
+              return prev;
+            }
+            setUserLocation(coords);
+            setLocationAccuracy(pos.coords.accuracy ?? null);
+            setLocationAcquiring(false);
+            saveLastKnownLocation(coords[0], coords[1]);
+            setTotalDistance((d) => d + distKm);
+            return [...prev, coords];
+          });
+        },
+        () => {
+          setLocationAcquiring(false);
+          setLocationFailed(true);
+          showToast('Enable High Accuracy in your device settings. Location denied or timed out.');
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    },
+    [refreshHelpRequests, showToast, isDistressUser]
+  );
+
+  const handleCategorySelect = useCallback(
+    (cat: HelpCategory) => {
+      setHelpCategory(cat);
+      if (cat !== 'other') setOtherSpecify('');
+      const label = HELP_CATEGORIES.find((c) => c.id === cat)?.label ?? cat;
+      if (!navigator.geolocation) {
+        setLocationFailed(true);
+        showToast('Enable High Accuracy in your device settings.');
         return;
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
           setUserLocation(coords);
+          setLocationAccuracy(pos.coords.accuracy ?? null);
           setLocationFailed(false);
           saveLastKnownLocation(coords[0], coords[1]);
           const nearest = getNearestHub(coords, LOGISTICS_HUBS);
@@ -107,7 +220,7 @@ export default function EmergencyResponse({
           saveHelpRequest({
             lat: coords[0],
             lng: coords[1],
-            message: `Pending - ${categoryLabel} - Dispatching to ${hubName}`,
+            message: `Pending - ${label} - Dispatching to ${hubName}`,
             timestamp: Date.now(),
             severity: 7,
             ...(isDistressUser && { guestId: getGuestId() ?? getOrCreateGuestId() }),
@@ -119,21 +232,12 @@ export default function EmergencyResponse({
         },
         () => {
           setLocationFailed(true);
+          showToast('Enable High Accuracy in your device settings. Location denied or timed out.');
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     },
     [refreshHelpRequests, showToast, isDistressUser]
-  );
-
-  const handleCategorySelect = useCallback(
-    (cat: HelpCategory) => {
-      setHelpCategory(cat);
-      if (cat !== 'other') setOtherSpecify('');
-      const label = HELP_CATEGORIES.find((c) => c.id === cat)?.label ?? cat;
-      triggerLocationPing(label);
-    },
-    [triggerLocationPing]
   );
 
   const handleDispatchConfirm = useCallback(
@@ -163,11 +267,18 @@ export default function EmergencyResponse({
 
   useEffect(() => {
     const loc = getLastKnownLocation();
-    if (loc) setUserLocation([loc.lat, loc.lng]);
+    if (loc) {
+      setUserLocation([loc.lat, loc.lng]);
+      setLocationAccuracy(null);
+    }
   }, []);
 
   useEffect(() => {
-    const onOnline = () => setIsOnline(true);
+    const onOnline = async () => {
+      setIsOnline(true);
+      const synced = await syncPendingMissions();
+      if (synced > 0) showToast(`${synced} mission(s) synced to cloud`);
+    };
     const onOffline = () => setIsOnline(false);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
@@ -175,11 +286,61 @@ export default function EmergencyResponse({
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     refreshHelpRequests();
   }, [refreshHelpRequests]);
+
+  const handleStartMission = useCallback(() => {
+    setMissionActive(true);
+    setStartTime(Date.now());
+    setElapsedTime(0);
+    const label = helpCategory ? (HELP_CATEGORIES.find((c) => c.id === helpCategory)?.label ?? helpCategory) : 'Mission';
+    triggerLocationPing(label);
+  }, [helpCategory, triggerLocationPing]);
+
+  const handleEndMission = useCallback(async () => {
+    setMissionActive(false);
+    if (watchIdRef.current != null) {
+      navigator.geolocation?.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    const endTime = new Date().toISOString();
+    const startTimeIso = startTime != null ? new Date(startTime).toISOString() : endTime;
+    const avgSpeed = elapsedTime > 0 ? totalDistance / (elapsedTime / 3600) : 0;
+    setMissionSummaryData({ elapsedTime, totalDistance, pathPoints: pathHistory.length });
+    setMissionSummaryOpen(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? null;
+      const result = await saveMission({
+        start_time: startTimeIso,
+        end_time: endTime,
+        total_distance: totalDistance,
+        avg_speed: avgSpeed,
+        path_data: pathHistory,
+        user_id: userId,
+      });
+      if (result.ok) {
+        if (result.offline) {
+          showToast('Mission saved offline — will sync when online');
+        } else {
+          showToast('Mission Data Synced');
+        }
+        setPathHistory([]);
+        setTotalDistance(0);
+        setElapsedTime(0);
+        setStartTime(null);
+      }
+    } catch {
+      showToast('Mission saved offline — will sync when online');
+      setPathHistory([]);
+      setTotalDistance(0);
+      setElapsedTime(0);
+      setStartTime(null);
+    }
+  }, [startTime, elapsedTime, totalDistance, pathHistory, showToast]);
 
   const handleParishSelect = useCallback(
     (parish: string) => {
@@ -187,6 +348,9 @@ export default function EmergencyResponse({
       const coords = getHubCoordsForParish(parish);
       if (coords) {
         setUserLocation(coords);
+        setLocationAccuracy(null);
+        setPathHistory([]);
+        setTotalDistance(0);
         const nearest = getNearestHub(coords, LOGISTICS_HUBS);
         const hubName = nearest?.hub.name ?? parish;
         saveHelpRequest({
@@ -459,7 +623,28 @@ export default function EmergencyResponse({
 
         {!showIntake && activeTab === 'map' && (
           <section>
-            <h2 className="text-amber-400 font-bold text-lg mb-3">Incident Map</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h2 className="text-amber-400 font-bold text-lg">Incident Map</h2>
+              <div className="flex gap-2">
+                {!missionActive ? (
+                  <button
+                    type="button"
+                    onClick={handleStartMission}
+                    className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold text-sm"
+                  >
+                    ▶ Start Mission
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleEndMission}
+                    className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-sm"
+                  >
+                    ⏹ End Mission
+                  </button>
+                )}
+              </div>
+            </div>
             {!isOnline && (
               <p className="text-amber-500 text-sm mb-4">
                 Map requires internet. Use &quot;Switch to Survival Mode&quot; above for offline features.
@@ -468,8 +653,39 @@ export default function EmergencyResponse({
             <p className="text-amber-500/80 text-sm mb-4">
               Your location (red), nearest hub, disaster hazards. Help is coming from the nearest of 31 logistics hubs.
             </p>
-            <IncidentMap userLocation={userLocation} helpRequests={helpRequests} />
+            <IncidentMap
+              userLocation={userLocation}
+              locationAccuracy={locationAccuracy}
+              locationAcquiring={locationAcquiring}
+              totalDistance={totalDistance}
+              pathPoints={pathHistory.length}
+              pathHistory={pathHistory}
+              elapsedTime={elapsedTime}
+              missionActive={missionActive}
+              helpRequests={helpRequests}
+            />
           </section>
+        )}
+
+        {missionSummaryOpen && missionSummaryData && (
+          <div className="fixed inset-0 z-[10001] bg-black/80 flex items-center justify-center p-4">
+            <div className="bg-black border-2 border-amber-500/40 rounded-xl max-w-sm w-full p-6 shadow-xl">
+              <h3 className="text-amber-400 font-bold text-lg mb-4">Mission Summary</h3>
+              <div className="space-y-2 text-amber-200 text-sm">
+                <p>⏱️ Duration: {formatElapsed(missionSummaryData.elapsedTime)}</p>
+                <p>🛣️ Distance: {missionSummaryData.totalDistance.toFixed(2)} km</p>
+                <p>🚀 Avg Speed: {missionSummaryData.elapsedTime > 0 ? ((missionSummaryData.totalDistance / (missionSummaryData.elapsedTime / 3600))).toFixed(1) : '0.0'} km/h</p>
+                <p>📍 Path Points: {missionSummaryData.pathPoints}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setMissionSummaryOpen(false); setMissionSummaryData(null); }}
+                className="mt-6 w-full py-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-black font-bold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
