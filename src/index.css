@@ -1,0 +1,101 @@
+@import 'leaflet/dist/leaflet.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hazardPulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 0.95; }
+}
+
+.hazard-pulse {
+  animation: hazardPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes hubGoldPulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+.hub-gold-pulse {
+  animation: hubGoldPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes crissScanLine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.criss-scan-line {
+  animation: crissScanLine 1.5s ease-in-out infinite;
+}
+
+@keyframes voiceListeningPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.voice-listening-pulse {
+  animation: voiceListeningPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes distressPulse {
+  0%, 100% { box-shadow: 0 0 20px #FF413666; transform: scale(1); }
+  50% { box-shadow: 0 0 32px #FF4136aa; transform: scale(1.02); }
+}
+
+.distress-pulse {
+  animation: distressPulse 1.5s ease-in-out infinite;
+}
+
+/* Safety Red Ripple for user location on map */
+@keyframes safetyRedRipple {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 65, 54, 0.7); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 20px rgba(255, 65, 54, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 65, 54, 0); }
+}
+
+.safety-red-ripple {
+  animation: safetyRedRipple 1.8s ease-out infinite;
+}
+
+/* Success checkmark animation */
+@keyframes successCheckmark {
+  0% { transform: scale(0.8); opacity: 0; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.success-checkmark-animation {
+  animation: successCheckmark 0.6s ease-out forwards;
+}
+
+/* Dispatch step pulsing blue */
+@keyframes dispatchPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6); }
+  50% { opacity: 0.9; box-shadow: 0 0 0 12px rgba(37, 99, 235, 0); }
+}
+
+.dispatch-pulse {
+  animation: dispatchPulse 1.5s ease-in-out infinite;
+}

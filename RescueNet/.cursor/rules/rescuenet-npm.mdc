@@ -1,0 +1,13 @@
+---
+description: RescueNet npm and Expo setup; use clean-install when install fails
+globs: package.json,**/package.json,.npmrc,scripts/*.ps1
+alwaysApply: false
+---
+
+# RescueNet – npm and Expo
+
+- **Start dev**: From project root run `npx expo start` (or `npm start`). Do not run `npx start`; that is invalid.
+- **Install**: Use `npm install` in project root. If install fails with TAR_ENTRY_ERROR, EPERM, ENOTEMPTY, or a broken `node_modules`:
+  - Suggest `npm run clean-install` (runs `scripts/clean-install.ps1`: removes `node_modules` and `package-lock.json`, then `npm install`).
+  - If the user is on Windows and sees EPERM when removing `node_modules`, suggest closing Cursor/IDE and running PowerShell as Administrator, then `npm run clean-install`.
+- **Expo not found**: "Cannot determine the project's Expo SDK version because the module expo is not installed" means dependencies are missing or corrupted; recommend `npm run clean-install` then `npx expo start`.

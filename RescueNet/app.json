@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "RescueNet",
+    "slug": "rescue-net",
+    "version": "1.0.0",
+    "description": "Disaster response and logistics platform for Jamaica.",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c4a6e"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rescuenet.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0c4a6e"
+      },
+      "package": "com.rescuenet.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "config": {
+        "pwa": {
+          "name": "RescueNet Jamaica",
+          "shortName": "RescueNet",
+          "themeColor": "#0c4a6e",
+          "backgroundColor": "#0c4a6e",
+          "display": "standalone",
+          "orientation": "portrait"
+        }
+      }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow RescueNet to access your photos to attach needs documentation."
+        }
+      ],
+      "expo-asset",
+      "@react-native-community/datetimepicker"
+    ]
+  }
+}
